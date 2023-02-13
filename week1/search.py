@@ -94,10 +94,14 @@ def query():
     print("query obj: {}".format(query_obj))
 
     #### Step 4.b.ii
-    response = None   # TODO: Replace me with an appropriate call to OpenSearch
+    # TODO: Replace me with an appropriate call to OpenSearch
+    response = opensearch.search(
+        body = query_obj,
+        index = "bbuy_products"
+    )
     # Postprocess results here if you so desire
 
-    #print(response)
+    # print(response)
     if error is None:
         return render_template("search_results.jinja2", query=user_query, search_response=response,
                                display_filters=display_filters, applied_filters=applied_filters,
@@ -111,11 +115,75 @@ def create_query(user_query, filters, sort="_score", sortDir="desc"):
     query_obj = {
         'size': 10,
         "query": {
-            "match_all": {} # Replace me with a query that both searches and filters
+            "match_all": {}
         },
         "aggs": {
             #### Step 4.b.i: create the appropriate query and aggregations here
-
-        }
+            "regularPrice": {
+                "range": {
+                    "field": "regularPrice",
+                    "ranges": [
+                    {
+                        "to": 50
+                    },
+                    {
+                        "from": 50,
+                        "to": 100
+                    },
+                    {
+                        "from": 100,
+                        "to": 200
+                    },
+                    {
+                        "from": 200,
+                        "to": 500
+                    },
+                    {
+                        "from": 500
+                    }
+                    ]
+                }
+            },
+            "department":{
+                "terms": {
+                    "field": "department.keyword",
+                    "size": 100
+                }
+            },
+            "missing_images":{
+                "missing": {
+                    "field": "image.keyword"
+                }
+            }
+        },
+        "sort": [
+                {
+                    sort: {
+                        "order": sortDir
+                    }
+                }
+            ]
     }
+
+    if user_query:
+        query_obj["query"] = {
+            "bool": {
+                "must": {
+                    "query_string": {
+                        "fields": ["name^4", "shortDescription", "longDescription"],
+                        "query": user_query,
+                        "phrase_slop": 3
+                    }
+                },
+                "filter": filters
+            }
+        }
+        query_obj["highlight"] = {
+            "fields": {
+                "name": {},
+                "shortDescription": {},
+                "longDescription": {}
+            }
+        }
+
     return query_obj

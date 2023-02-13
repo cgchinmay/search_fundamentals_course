@@ -7,6 +7,7 @@ import click
 import glob
 from opensearchpy import OpenSearch
 from opensearchpy.helpers import bulk
+from opensearchpy.helpers.errors import BulkIndexError
 import logging
 
 from time import perf_counter
@@ -85,7 +86,15 @@ def get_opensearch():
     port = 9200
     auth = ('admin', 'admin')
     #### Step 2.a: Create a connection to OpenSearch
-    client = None
+    client = OpenSearch(
+            hosts = [{'host': host, 'port': port}],
+            http_compress=True,
+            http_auth = auth,
+            use_ssl=True,
+            verify_certs=False,
+            ssl_assert_hostname=False,
+            ssl_show_warn=False
+        )
     return client
 
 
@@ -107,9 +116,41 @@ def index_file(file, index_name):
         if 'productId' not in doc or len(doc['productId']) == 0:
             continue
         #### Step 2.b: Create a valid OpenSearch Doc and bulk index 2000 docs at a time
-        the_doc = None
-        docs.append(the_doc)
+        the_doc = {
+            "id": doc['sku'][0],
+            "_index": index_name
+        }
 
+        for k,v in doc.items():
+            if type(v) == list:
+                if v:
+                    values = ','.join(v)
+                    the_doc[k] = values
+            else:
+                 the_doc[k] = v
+        
+        docs.append(the_doc)
+        l = len(docs)
+        if l == 2000:
+            try:
+                resp = bulk(client, docs)
+                docs_indexed += resp[0]
+            except BulkIndexError as e:
+                logger.error(e)
+                docs_indexed += l - len(e.errors)
+            docs = []
+
+    # remaining docs
+    l = len(docs)
+    if l > 0:
+        try:
+            resp = bulk(client, docs)
+            docs_indexed += resp[0]
+        except BulkIndexError as e:
+            logger.error(e)
+            docs_indexed += l - len(e.errors)
+        docs = []
+            
     return docs_indexed
 
 @click.command()
@@ -119,6 +160,7 @@ def index_file(file, index_name):
 def main(source_dir: str, index_name: str, workers: int):
 
     files = glob.glob(source_dir + "/*.xml")
+    # file = "/workspace/datasets/product_data/products/products_0001_2570_to_430420.xml"
     docs_indexed = 0
     start = perf_counter()
     with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
@@ -128,6 +170,7 @@ def main(source_dir: str, index_name: str, workers: int):
 
     finish = perf_counter()
     logger.info(f'Done. Total docs: {docs_indexed} in {(finish - start)/60} minutes')
+    # index_file(file, "test-index")
 
 if __name__ == "__main__":
     main()
