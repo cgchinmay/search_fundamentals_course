@@ -9,6 +9,8 @@ from week2.opensearch import get_opensearch
 
 import week2.utilities.query_utils as qu
 
+from week2.utilities.query_utils import add_spelling_suggestions
+
 bp = Blueprint('search', __name__, url_prefix='/search')
 
 
@@ -32,11 +34,11 @@ def process_filters(filters_input):
             print("from: {}, to: {}".format(from_val, to_val))
             # we need to turn the "to-from" syntax of aggregations to the "gte,lte" syntax of range filters.
             to_from = {}
-            if from_val:
+            if from_val and from_val != "*":
                 to_from["gte"] = from_val
             else:
                 from_val = "*"  # set it to * for display purposes, but don't use it in the query
-            if to_val:
+            if to_val and to_val != "*":
                 to_from["lt"] = to_val
             else:
                 to_val = "*"  # set it to * for display purposes, but don't use it in the query
@@ -57,15 +59,32 @@ def process_filters(filters_input):
 
 @bp.route('/autocomplete', methods=['GET'])
 def autocomplete():
+    opensearch = get_opensearch()
     results = {}
     if request.method == 'GET':  # a query has been submitted
         prefix = request.args.get("prefix")
         print(f"Prefix: {prefix}")
+        indexName = "bbuy_products"
         if prefix is not None:
             type = request.args.get("type", "queries") # If type == queries, this is an autocomplete request, else if products, it's an instant search request.
             ##### W2, L3, S1
             search_response = None
             print("TODO: implement autocomplete AND instant search")
+            query_obj = {
+                    "suggest": {
+                    "autocomplete": {
+                            "prefix": prefix,
+                            "completion":{
+                                "field":"suggest",
+                                "skip_duplicates": True
+                            }
+                        }
+                    }
+                }
+            if type == "queries":
+                indexName = "bbuy_queries"
+            
+            search_response = opensearch.search(body=query_obj, index=indexName)
             if (search_response and search_response['suggest']['autocomplete'] and search_response['suggest']['autocomplete'][0]['length'] > 0): # just a query response
                 results = search_response['suggest']['autocomplete'][0]['options']
     print(f"Results: {results}")
@@ -108,6 +127,7 @@ def query():
         ##### W2, L1, S2
 
         ##### W2, L2, S2
+        add_spelling_suggestions(query_obj, user_query)
         print("Plain ol q: %s" % query_obj)
     elif request.method == 'GET':  # Handle the case where there is no query or just loading the page
         user_query = request.args.get("query", "*")
@@ -123,7 +143,8 @@ def query():
         #### W2, L1, S2
 
         ##### W2, L2, S2
-
+        add_spelling_suggestions(query_obj, user_query)
+        print(query_obj)
     else:
         query_obj = qu.create_query("*", "", [], sort, sortDir, size=100)
 
